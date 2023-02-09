@@ -1,0 +1,4 @@
+---
+doc_root: /var/www/wordpress
+http_port: 80
+conf_dest: /etc/apache2/sites-available

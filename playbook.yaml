@@ -1,0 +1,94 @@
+---
+ - name: Deploying WordPress using Ansible
+   hosts: all
+   become: true
+   gather_facts: false
+
+   vars_files:
+    - dependency.yaml
+    - variables.yaml
+    - databaseinfo.yaml
+
+   tasks:
+    - name: Installing Dependencies
+      ansible.builtin.apt:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ dependency }}"
+      notify: Restart apache & mysql
+
+    - name: Restart mysql
+      ansible.builtin.service:
+        name: mysql
+        state: restarted
+
+    - name: Installing WordPress Files
+      ansible.builtin.shell: 
+       cmd: "mkdir -p {{ doc_root }} && chown www-data: {{ doc_root}} && curl https://wordpress.org/latest.tar.gz | tar zx -C {{ doc_root}}"
+    
+    - name: Configuring apache2
+      ansible.builtin.template:
+        src: templates/apache.conf.j2
+        dest: "{{ conf_dest }}/wordpress.conf"
+      # notify: Restart apache2
+      
+    - name: Enable the site & Rewriting
+      ansible.builtin.shell: 
+        cmd: a2ensite wordpress && a2enmod rewrite && a2dissite 000-default
+      changed_when: true
+      notify: Restart apache2
+    
+    - name: Flushing handlers
+      ansible.builtin.meta: flush_handlers
+    
+    - name: Make sure pymysql is present
+      become: true # needed if the other tasks are not played as root
+      ansible.builtin.pip:
+        name: pymysql
+        state: present
+      ignore_errors: true 
+
+    - name: Set MySQL root Password
+      community.mysql.mysql_user:
+        login_host: 'localhost'
+        login_unix_socket: /var/run/mysqld/mysqld.sock
+        login_user: 'root'
+        login_password: ''
+        name: 'root'
+        password: "{{ rootpass }}"
+        state: present
+      ignore_errors: true
+        
+    - name: Add database
+      community.mysql.mysql_db:
+       name:  "{{ db_name }}"     
+       login_user: root
+       login_password: "{{ rootpass }}"
+       state: present
+
+    - name: Creat database user and password
+      community.mysql.mysql_user:
+        name: "{{ db_user }}"
+        password: "{{ db_password }}"
+        login_user: root
+        login_password: "{{ rootpass }}"
+        priv: "{{ db_name }}.*:ALL"
+        state: present
+    
+    # - name: Setting up the wp-config.php Files
+    #   ansible.builtin.shell:
+    #     cmd: "cp {{ doc_root }}/wordpress/wp-config-sample.php {{ doc_root }}/wordpress/wp-config.php"
+
+   handlers:
+    - name: Restart apache2
+      ansible.builtin.service:
+        name: apache2
+        state: restarted
+      listen: Restart apache & mysql
+
+    - name: Restart mysql
+      ansible.builtin.service:
+        name: mysql
+        state: restarted
+      listen: Restart apache & mysql
+    
